@@ -1915,7 +1915,7 @@ export class TaskOrchestrator {
   }
 
   private logWaitingForReady(producer: Task) {
-    if (!this.tuiEnabled) {
+    if (!this.tuiEnabled && printsTaskOutput(this.resolvedOutputStyle)) {
       console.log(`Waiting for "${producer.id}" to be ready...`);
     }
   }
@@ -1929,7 +1929,7 @@ export class TaskOrchestrator {
     signal?: AbortSignal
   ): Promise<void> {
     const deadline = Date.now() + readyWhen.timeout;
-    let seenRow = false;
+    let lastStatus: TaskReadiness | null = null;
     while (true) {
       if (signal?.aborted) {
         throw notReadyError(producer.id, 'exited');
@@ -1940,12 +1940,15 @@ export class TaskOrchestrator {
       const status =
         this.runningTasksService?.getTaskReadiness(producer.id) ?? null;
       if (status === null) {
-        if (seenRow) {
+        if (lastStatus !== null) {
           throw notReadyError(producer.id, 'exited');
         }
         return;
       }
-      seenRow = true;
+      if (status !== lastStatus) {
+        lastStatus = status;
+        this.options.lifeCycle.setTaskReadiness?.(producer.id, status);
+      }
       if (status === TaskReadiness.Ready) {
         return;
       }
@@ -1967,6 +1970,7 @@ export class TaskOrchestrator {
     runningTask: RunningTask
   ) {
     const state = this.armReadiness(task.id);
+    this.options.lifeCycle.setTaskReadiness?.(task.id, TaskReadiness.Pending);
     waitForReadiness(readyWhen, {
       taskId: task.id,
       runningTask,
@@ -1992,6 +1996,7 @@ export class TaskOrchestrator {
   // The probe's verdict stands for local waiters even when the row for
   // other processes cannot be written
   private recordReadiness(task: Task, status: TaskReadiness) {
+    this.options.lifeCycle.setTaskReadiness?.(task.id, status);
     try {
       this.runningTasksService?.setTaskReadiness(task.id, status);
     } catch (e) {
