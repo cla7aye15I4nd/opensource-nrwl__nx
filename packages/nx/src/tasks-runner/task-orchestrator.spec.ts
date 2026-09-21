@@ -1662,6 +1662,7 @@ describe('TaskOrchestrator', () => {
       const outputListeners: ((chunk: string) => void)[] = [];
       const runningTask = {
         onOutput: (cb: (chunk: string) => void) => outputListeners.push(cb),
+        kill: vi.fn(),
       };
       const emit = (chunk: string) =>
         outputListeners.forEach((cb) => cb(chunk));
@@ -1731,6 +1732,7 @@ describe('TaskOrchestrator', () => {
       expect(
         orchestrator.runningTasksService.setTaskReadiness
       ).toHaveBeenCalledWith('app:serve', 2);
+      expect(runningTask.kill).not.toHaveBeenCalled();
     });
 
     it('fails the waiter when the producer exits before it is ready', async () => {
