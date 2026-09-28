@@ -1393,7 +1393,7 @@ fn upstream_output_roots(task_graph: &TaskGraph, task_id: &str) -> Vec<String> {
         ]
         .into_iter()
         .flatten()
-        .flat_map(|deps| deps.iter().map(String::as_str))
+        .flat_map(|deps| deps.iter().map(|edge| edge.id.as_str()))
         .collect::<Vec<&str>>()
     };
     let mut roots = Vec::new();
@@ -1680,6 +1680,8 @@ fn find_external_dependency_node_name<'a>(
 mod tests {
     use super::*;
     use crate::native::project_graph::types::{ExternalNode, Project, Target};
+    use crate::native::tasks::types::TaskGraphEdge;
+    use crate::native::test_utils::edges_to;
 
     fn mixed_cycle_planner(with_outputs: bool) -> HashPlanner {
         use crate::native::types::{DepsOutputsInput, JsInputs};
@@ -1818,7 +1820,7 @@ mod tests {
                             (
                                 id.clone(),
                                 if id == "app:build" {
-                                    vec!["leaf:build".to_string()]
+                                    edges_to(&["leaf:build"])
                                 } else {
                                     vec![]
                                 },
@@ -2273,8 +2275,8 @@ mod tests {
         .collect();
         let edges = |list: &[(&str, &[&str])]| {
             list.iter()
-                .map(|(id, deps)| (id.to_string(), strings(deps)))
-                .collect::<HashMap<String, Vec<String>>>()
+                .map(|(id, deps)| (id.to_string(), edges_to(deps)))
+                .collect::<HashMap<String, Vec<TaskGraphEdge>>>()
         };
         let task_graph = TaskGraph {
             roots: vec![],
@@ -2475,7 +2477,8 @@ mod plan_memo_tests {
 mod continuous_inputs_tests {
     use super::*;
     use crate::native::project_graph::types::{Project, Target};
-    use crate::native::test_utils::task_graph;
+    use crate::native::tasks::types::TaskGraphEdge;
+    use crate::native::test_utils::{edges_to, strings, task_graph};
     use crate::native::types::DepsOutputsInput;
     use napi::bindgen_prelude::Either9;
 
@@ -2525,10 +2528,15 @@ mod continuous_inputs_tests {
     }
 
     fn graph(continuous: &[(&str, &[&str])], without_inputs: &[(&str, &[&str])]) -> TaskGraph {
+        let ids = |list: &[(&str, &[&str])]| {
+            list.iter()
+                .map(|(id, deps)| (id.to_string(), strings(deps)))
+                .collect::<HashMap<String, Vec<String>>>()
+        };
         let edges = |list: &[(&str, &[&str])]| {
             list.iter()
-                .map(|(id, deps)| (id.to_string(), deps.iter().map(|d| d.to_string()).collect()))
-                .collect::<HashMap<String, Vec<String>>>()
+                .map(|(id, deps)| (id.to_string(), edges_to(deps)))
+                .collect::<HashMap<String, Vec<TaskGraphEdge>>>()
         };
         let mut graph = task_graph(
             &[
@@ -2541,7 +2549,7 @@ mod continuous_inputs_tests {
         );
         graph.continuous_dependencies = edges(continuous);
         graph.continuous_dependencies_without_inputs =
-            (!without_inputs.is_empty()).then(|| edges(without_inputs));
+            (!without_inputs.is_empty()).then(|| ids(without_inputs));
         graph
     }
 
