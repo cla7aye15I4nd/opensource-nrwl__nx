@@ -576,9 +576,7 @@ describe('target-name cache fallback', () => {
     // The name key's entry declares a foreign executor, so it was dropped as
     // incompatible rather than shadowed. Pre-23 this target WAS cacheable —
     // that derivation matched on target name alone and never read the entry's
-    // `executor` — so this is a deliberate narrowing, not parity. Restoring it
-    // would set `cache` with no key to name in the warning and no migration
-    // able to retire it.
+    // `executor` — so this is a deliberate narrowing, not parity.
     const target = normalize(
       { executor: '@nx/angular:webpack-browser' },
       { build: { cache: true, executor: '@nx/js:tsc' } }
@@ -588,8 +586,8 @@ describe('target-name cache fallback', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('should warn naming the shadowing key and the key it was read from', () => {
-    normalize(
+  it('should apply without logging a warning', () => {
+    const target = normalize(
       { executor: '@nx/angular:webpack-browser' },
       {
         build: { cache: true },
@@ -597,17 +595,11 @@ describe('target-name cache fallback', () => {
       }
     );
 
-    expect(warn).toHaveBeenCalledTimes(1);
-    const bodyLines = warn.mock.calls[0][0].bodyLines.join('\n');
-    expect(bodyLines).toContain(
-      '"@nx/angular:webpack-browser" does not set "cache", so it was read from "build"'
-    );
-    // The deadline is load-bearing: the TODO(v24) markers on both halves assume
-    // it, so the user-facing text has to name the same release.
-    expect(bodyLines).toContain('will be removed in Nx 24');
+    expect(target.cache).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  it('should group the warning across projects and targets', () => {
+  it('should apply across projects and targets', () => {
     const rootMap = {
       'libs/a': {
         name: 'a',
@@ -632,23 +624,9 @@ describe('target-name cache fallback', () => {
       },
     });
 
-    // Three shadowed targets across two projects, but only two distinct
-    // (executor key, target key) pairs — and one warning.
-    expect(warn).toHaveBeenCalledTimes(1);
-    const bodyLines: string[] = warn.mock.calls[0][0].bodyLines;
-    expect(
-      bodyLines.filter((line) => line.includes('does not set "cache"'))
-    ).toHaveLength(2);
-  });
-
-  it('should not warn when nothing was shadowed', () => {
-    normalize(
-      { executor: '@nx/angular:webpack-browser' },
-      {
-        build: { cache: true },
-      }
-    );
-
+    expect(rootMap['libs/a'].targets.build.cache).toBe(true);
+    expect(rootMap['libs/b'].targets.build.cache).toBe(true);
+    expect(rootMap['libs/b'].targets.test.cache).toBe(true);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -679,14 +657,13 @@ describe('target-name cache fallback', () => {
   it('should not treat an inherited key as a shadowing executor key', () => {
     // `targetDefaults["__proto__"]` resolves through the prototype chain to a
     // truthy object, so an unguarded lookup reports a shadowing key that the
-    // user never wrote — restoring cache and naming it in the warning.
+    // user never wrote and restores cache through it.
     const target = normalize(
       { executor: '__proto__' },
       { build: { cache: true } }
     );
 
     expect(target.cache).toBeUndefined();
-    expect(warn).not.toHaveBeenCalled();
   });
 
   it('should not restore cache when the target-name key declares none', () => {
@@ -702,7 +679,6 @@ describe('target-name cache fallback', () => {
     );
 
     expect(target.cache).toBeUndefined();
-    expect(warn).not.toHaveBeenCalled();
   });
 
   it('should stop at a filtered entry rather than read past it to a later one', () => {

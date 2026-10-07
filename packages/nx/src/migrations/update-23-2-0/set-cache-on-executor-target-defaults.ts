@@ -22,9 +22,6 @@ import {
 import type { PackageJson } from '../../utils/package-json';
 import { joinPathFragments } from '../../utils/path';
 
-// TODO(v24): remove this migration alongside the runtime fallback it exists to
-// retire (`isLegacyCachedTarget` in `target-normalization.ts`), along with its
-// registration in `packages/nx/migrations.json`.
 /**
  * Target defaults resolve to a single key rather than merging, so an executor
  * key hides the target name key entirely. Before Nx 23 a hidden `cache: true`
@@ -32,8 +29,8 @@ import { joinPathFragments } from '../../utils/path';
  * via `cacheableOperations`; Nx 23 removed that derivation and those targets
  * silently stopped being cacheable.
  *
- * Write the intent into the executor key so it no longer depends on the
- * deprecated fallback that restores the old behavior at run time.
+ * Write the intent into the executor key, which is clearer than relying on the
+ * runtime fallback that reads `cache` through the shadowed target name key.
  */
 export default async function update(tree: Tree) {
   const nxJson = readNxJson(tree);

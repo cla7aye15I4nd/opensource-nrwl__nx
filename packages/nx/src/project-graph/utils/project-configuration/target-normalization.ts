@@ -13,7 +13,6 @@ import {
 } from '../../../command-line/run/executor-utils';
 import { readJsonFile } from '../../../utils/fileutils';
 import { isLongRunningTargetName } from '../../../utils/long-running-target';
-import { output } from '../../../utils/output';
 import { toProjectName } from '../../../config/to-project-name';
 import {
   isProjectWithExistingNameError,
@@ -121,19 +120,15 @@ export function normalizeTarget(
   return target;
 }
 
-// TODO(v24): remove the legacy target-name cache fallback and its warning.
-// Removal needs a second mechanism for plugin-inferred targets, which the
-// accompanying migration cannot reach.
 /**
- * Whether `target` is cacheable only by way of the legacy name-based fallback:
- * the exact target-name key of `targetDefaults` declares `cache: true`, but an
- * executor key won target-default resolution instead, so the merged target never
- * received it.
+ * Whether `target` takes `cache: true` from its exact target-name key in
+ * `targetDefaults` even though an executor key won target-default resolution,
+ * so the merged target never received it.
  *
- * A `true` result means the user's `cache: true` silently lost, so this doubles
- * as the condition for warning them that the name key is being shadowed.
+ * `cache` is the one field read through a shadowed name key because it is the
+ * only one that used to come from target names, via `cacheableOperations`.
  */
-function isLegacyCachedTarget(
+function readsCacheFromTargetNameKey(
   targetName: string,
   targetDefaults: TargetDefaults | undefined,
   target: TargetConfiguration
@@ -147,11 +142,10 @@ function isLegacyCachedTarget(
     return false;
   }
 
-  // Restricted to shadowing, which is narrower than what pre-23 restored: that
-  // derivation matched on target name alone, so a name key dropped as
-  // incompatible (its entry declared a foreign executor) was cacheable too.
-  // Restoring that as well would mean writing `cache` with no key to name in
-  // the warning, and no migration able to retire it. Deliberately not covered.
+  // Restricted to shadowing, which is narrower than pre-23: that derivation
+  // matched on target name alone, so a name key dropped as incompatible (its
+  // entry declared a foreign executor) was cacheable too. Deliberately not
+  // covered.
   if (!findShadowingTargetDefaultKey(targetDefaults, target)) {
     return false;
   }
@@ -203,8 +197,8 @@ function isLongRunningTarget(
  * executor key can: key precedence puts the exact target name ahead of every
  * glob, so nothing else outranks it. Undefined when the name key lost for
  * another reason (e.g. its entry declared a foreign executor and was dropped as
- * incompatible) — see {@link isLegacyCachedTarget} for why that case is left
- * alone even though pre-23 restored it.
+ * incompatible) — see {@link readsCacheFromTargetNameKey} for why that case
+ * is left alone even though pre-23 restored it.
  *
  * `hasOwnProperty` rather than a lookup: an executor named `__proto__` resolves
  * through the prototype chain to a truthy object, which would report a key the
@@ -219,40 +213,6 @@ function findShadowingTargetDefaultKey(
     Object.prototype.hasOwnProperty.call(targetDefaults, target.executor)
     ? target.executor
     : undefined;
-}
-
-/**
- * Emits a single grouped warning for every (shadowing key, target-name key)
- * pair that relied on the deprecated fallback. Grouping matters because the
- * same pair recurs in every affected project — a per-target warning would
- * print hundreds of identical lines in a large workspace.
- */
-function warnAboutLegacyCachedTargets(
-  legacyCacheReads: Map<string, Set<string>>
-) {
-  if (legacyCacheReads.size === 0) {
-    return;
-  }
-
-  const bodyLines: string[] = [];
-  for (const [shadowingKey, targetKeys] of legacyCacheReads) {
-    for (const targetKey of targetKeys) {
-      bodyLines.push(
-        `  - "${shadowingKey}" does not set "cache", so it was read from "${targetKey}"`
-      );
-    }
-  }
-  bodyLines.push(
-    '',
-    'An executor key applies to every target that resolves through it, so exclude any continuous target before setting "cache" on one — a target that is both cacheable and continuous is rejected.',
-    'Target defaults resolve to a single key rather than merging, so an executor key hides the target name key entirely.',
-    'Set "cache" on the executor key to keep these targets cacheable — reading it from the target name key is deprecated and will be removed in Nx 24.'
-  );
-
-  output.warn({
-    title: 'Some targets are only cacheable through a deprecated fallback.',
-    bodyLines,
-  });
 }
 
 /**
@@ -377,12 +337,7 @@ function normalizeTargets(
   /**
    * Project configurations keyed by project name
    */
-  projects: Record<string, ProjectConfiguration>,
-  /**
-   * Shadowing `targetDefaults` key -> target name keys its `cache` was read
-   * from. Accumulated across projects so the deprecation warns once per pair.
-   */
-  legacyCacheReads: Map<string, Set<string>>
+  projects: Record<string, ProjectConfiguration>
 ) {
   const targetErrorMessage: string[] = [];
 
@@ -407,18 +362,14 @@ function normalizeTargets(
       ).map((message) => `- ${message}`)
     );
 
-    const targetDefaults = nxJsonConfiguration.targetDefaults;
-    if (isLegacyCachedTarget(targetName, targetDefaults, target)) {
-      target.cache = true;
-
-      // Always defined: `isLegacyCachedTarget` returns false without it.
-      const shadowingKey = findShadowingTargetDefaultKey(
-        targetDefaults,
+    if (
+      readsCacheFromTargetNameKey(
+        targetName,
+        nxJsonConfiguration.targetDefaults,
         target
-      );
-      const targetKeys = legacyCacheReads.get(shadowingKey) ?? new Set();
-      targetKeys.add(targetName);
-      legacyCacheReads.set(shadowingKey, targetKeys);
+      )
+    ) {
+      target.cache = true;
     }
 
     if (
@@ -464,7 +415,6 @@ export function validateAndNormalizeProjectRootMap(
   const conflicts = new Map<string, string[]>();
   const projectRootsWithNoName: string[] = [];
   const validityErrors: WorkspaceValidityError[] = [];
-  const legacyCacheReads = new Map<string, Set<string>>();
 
   for (const root in projectRootMap) {
     const project = projectRootMap[root];
@@ -518,8 +468,7 @@ export function validateAndNormalizeProjectRootMap(
         sourceMaps,
         nxJsonConfiguration,
         workspaceRoot,
-        projects,
-        legacyCacheReads
+        projects
       );
     } catch (e) {
       if (e instanceof WorkspaceValidityError) {
@@ -529,8 +478,6 @@ export function validateAndNormalizeProjectRootMap(
       }
     }
   }
-
-  warnAboutLegacyCachedTargets(legacyCacheReads);
 
   const errors: Error[] = [];
 
