@@ -1752,7 +1752,7 @@ export class TaskOrchestrator {
       );
       if (readyWhen) {
         const state = this.armReadiness(task.id);
-        this.pollReadinessRow(task, readyWhen, state.abort.signal).then(
+        this.pollReadinessRow(task, readyWhen, state.abort.signal, true).then(
           () => {
             if (!state.abort.signal.aborted) state.resolve();
           },
@@ -1908,12 +1908,14 @@ export class TaskOrchestrator {
     }
   }
 
-  // A row absent from the start means there is no readiness status to wait on.
-  // A row that disappears mid-wait means the producer exited.
+  // A row absent from the start means there is no readiness status to wait on,
+  // unless the caller saw an owner that is now gone. A row that disappears
+  // mid-wait means the producer exited.
   private async pollReadinessRow(
     producer: Task,
     readyWhen: NormalizedReadyWhen,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    ownerObserved = false
   ): Promise<void> {
     const deadline = Date.now() + readyWhen.timeout;
     let lastStatus: TaskReadiness | null = null;
@@ -1927,7 +1929,11 @@ export class TaskOrchestrator {
       const status =
         this.runningTasksService?.getTaskReadiness(producer.id) ?? null;
       if (status === null) {
-        if (lastStatus !== null) {
+        if (
+          lastStatus !== null ||
+          (ownerObserved &&
+            !this.runningTasksService.getRunningTasks([producer.id]).length)
+        ) {
           throw notReadyError(producer.id, 'exited');
         }
         return;
