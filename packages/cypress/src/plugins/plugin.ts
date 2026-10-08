@@ -6,6 +6,7 @@ import {
   workspaceDataDirectory,
   PluginCache,
   globWithWorkspaceContext,
+  readUltracacheImportsDirective,
 } from '@nx/devkit/internal';
 import {
   AggregateCreateNodesError,
@@ -489,11 +490,16 @@ async function buildCypressTargets(
           options: 'forward',
         });
 
+        const hashesFromImports = readUltracacheImportsDirective(
+          context.workspaceRoot,
+          file
+        );
         if (ciWebServerCommandTask) {
           targets[targetName].dependsOn = [
             {
               target: ciWebServerCommandTask.target,
               projects: [ciWebServerCommandTask.project],
+              ...(hashesFromImports && { inputs: false }),
             },
           ];
         } else {

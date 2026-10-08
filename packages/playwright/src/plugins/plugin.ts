@@ -12,6 +12,7 @@ import {
   workspaceDataDirectory,
   PluginCache,
   getFilesInDirectoryUsingContext,
+  readUltracacheImportsDirective,
 } from '@nx/devkit/internal';
 import {
   AggregateCreateNodesError,
@@ -517,6 +518,14 @@ async function buildPlaywrightTargets(
       testIgnore,
     });
 
+    // The entries naming projects are the servers, not the readiness gate.
+    const dependsOnWithoutServerInputs = ciBaseTargetConfig.dependsOn?.map(
+      (dependency) =>
+        typeof dependency !== 'string' && dependency.projects
+          ? { ...dependency, inputs: false }
+          : dependency
+    );
+
     for (const testFile of testFiles) {
       const outputSubfolder = relative(projectRoot, testFile)
         .replace(/[\/\\]/g, '-')
@@ -546,8 +555,16 @@ async function buildPlaywrightTargets(
 
       const targetName = `${options.ciTargetName}--${relativeSpecFilePath}`;
       ciTargetGroup.push(targetName);
+      const hashesFromImports = readUltracacheImportsDirective(
+        context.workspaceRoot,
+        testFile
+      );
       targets[targetName] = {
         ...ciBaseTargetConfig,
+        ...(hashesFromImports &&
+          dependsOnWithoutServerInputs && {
+            dependsOn: dependsOnWithoutServerInputs,
+          }),
         options: {
           ...ciBaseTargetConfig.options,
           env: getAtomizedTaskEnvVars(reporterOutputs, outputSubfolder),
